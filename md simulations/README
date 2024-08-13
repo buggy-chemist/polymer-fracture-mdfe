@@ -1,0 +1,8 @@
+The "manager.sh" script sets up pure MD simulations for provided initial system data file "cgps_chec_cooled.data" in the seed folders. These MD simulations will have varying bond breaking thresholds and loading conditions as described in the paper.
+
+"pairs.dat", "bonds.dat", and "angles.dat" are the yabulated potentials governing our polystyrene model.
+
+"PS_equil_orig_ld.in", "PS_equil_orig_yz.in" are the lammps simulation scripts for the 2 different loading conditions. These are used as a template by the manager script.
+
+"analysis_plot.ipynb" is a python notebook that reads in simulation data and post processes it to perform various different calculations. The plots in the paper were generated within this notebook.
+

@@ -1,1 +1,7 @@
-README
+This repository contains public data for the publication "Unraveling the physical origin of fracture in glassy polymers using coupled atomistic-continuum simulations"
+
+These scripts, force fields, topologies and other files maybe used to reproduce the simulations and calculations that led to the above publication.
+
+The folder "md simulations" contains data files for pure MD simulations that were used as a reference for understanding molecular fracture mechanisms in our model.
+
+The folder "coupled simulations" contains data files for coupled MD-FE simulations which are the highlight of our publication.

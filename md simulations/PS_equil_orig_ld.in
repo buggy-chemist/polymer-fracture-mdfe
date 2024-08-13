@@ -1,0 +1,162 @@
+# PS_equil
+
+######## Variables #######################################################
+variable nbCutoff equal 15.0000000
+variable neighListCutoff equal 16.000000
+variable neighListUpdate equal 10
+variable skin equal "v_neighListCutoff-v_nbCutoff"
+
+variable Npair   equal 300
+variable Nbonds  equal 1501
+variable Nangles equal 181
+
+# Simulation parameters
+units          real
+processors	   * * *
+atom_style     molecular
+boundary       p p p
+
+# Read initial configuration through data file
+read_data      ../../cgps_check_cooled.data
+###########################################################################
+
+####### CG Forcefield #####################################################
+pair_style table spline ${Npair}
+pair_coeff 1 1 ../../../pairs.dat PR1 ${nbCutoff}
+pair_coeff 1 2 ../../../pairs.dat PR2 ${nbCutoff}
+pair_coeff 2 2 ../../../pairs.dat PR5 ${nbCutoff}
+
+bond_style table spline ${Nbonds}
+bond_coeff 1 ../../../bonds.dat BND1
+bond_coeff 2 ../../../bonds.dat BND2
+bond_coeff 3 ../../../bonds.dat BND3
+
+angle_style table spline ${Nangles}
+angle_coeff 1 ../../../angles.dat ANG1
+angle_coeff 2 ../../../angles.dat ANG2
+angle_coeff 3 ../../../angles.dat ANG3
+angle_coeff 4 ../../../angles.dat ANG4
+angle_coeff 5 ../../../angles.dat ANG5
+angle_coeff 6 ../../../angles.dat ANG6
+
+special_bonds lj 0.0 0.0 1.0
+##########################################################################
+
+# Timestep setting
+timestep       5
+
+neighbor 1.00000 bin
+neigh_modify every ${neighListUpdate}
+
+variable hflen equal lx/2
+change_box all x final -${hflen} ${hflen} y final -${hflen} ${hflen} z final -${hflen} ${hflen} remap
+
+# On-the-fly calculations of thermodynamics
+thermo         1000
+thermo_style   custom step time etotal ke pe ebond eangle edihed emol evdwl ecoul elong epair etail temp press lx ly lz
+thermo_modify  line multi lost error flush yes
+
+# Regions and Groups
+region obsreg block -50.0 50.0 -50.0 50.0 -50.0 50.0
+group obs dynamic all region obsreg
+compute obstemp obs temp
+
+# Short Equilibration
+fix 		   1 all npt temp 100.0 100.0 200.0 iso 1.0 1.0 200.0
+run 		   10000
+unfix		   1
+
+reset_timestep 0
+
+# Start dumping data
+dump           1 all xtc 5000 cgps.xtc
+#dump_modify	   1 scale no image yes
+
+# Density compute and output
+variable obsdens equal (count(obs)*104.25/1000000)*1660.5
+variable currstep equal step
+fix densprint all print 1000 "${currstep} ${obsdens}" file dens.dat screen no
+
+
+# bond_breaking
+fix bnd1brk all bond/break ${bndint} 1 ${bndbrk1}
+fix bnd2brk all bond/break ${bndint} 2 ${bndbrk2}
+fix bnd3brk all bond/break ${bndint} 3 ${bndbrk3}
+
+# Store final cell length for strain calculations
+variable tmpl equal "lx"
+variable L0 equal ${tmpl}
+variable tmp2 equal "ly"
+variable L0y equal ${tmp2}
+print "Initial Length, L0: ${L0}"
+variable volobs equal 100*100*100
+
+# Deformation
+fix 		   1 all npt temp 100.0 100.0 1000 y 1 1 2000 z 1 1 2000
+variable strainrate equal (5/10000000) # 10%strain/ns
+fix            2 all deform 1 x erate ${strainrate} units box remap x
+
+# Box stress calculation
+variable strain equal "(lx - v_L0)/v_L0"
+variable transstrain equal "(v_L0y - ly)/v_L0y"
+variable poisson equal "v_transstrain/v_strain"
+variable p1 equal "v_strain*100" # % strain
+variable p2 equal "-pxx*0.101325"
+variable p3 equal "-pyy*0.101325"
+variable p4 equal "-pzz*0.101325"
+fix stressprint all print 1000 "${currstep} ${p1} ${p2} ${p3} ${p4}" file stress_strain_box.dat screen no
+fix poissonprint all print 1000 "${currstep} ${p1} ${poisson}" file poissons_ratio.dat screen no
+
+# On-the-fly calculations of thermodynamics
+thermo         10000
+thermo_style   custom step time etotal ke pe ebond eangle edihed emol evdwl ecoul elong epair etail temp press v_poisson
+thermo_modify  line multi lost error flush yes
+
+# Periodic restart file
+#restart 10000 cgps.rst.*
+
+# # Energies
+# ## pair bond angle energies
+compute pairemobvector all pe/atom pair
+compute pairemob all reduce sum c_pairemobvector
+compute bemobvector all pe/atom bond
+compute bemob all reduce sum c_bemobvector
+compute aemobvector all pe/atom angle
+compute aemob all reduce sum c_aemobvector
+fix bondenergies all ave/time 10 100 1000 c_pairemob c_bemob c_aemob file energies.dat title1 "#timestep PE_pair PE_bond PE_angle" title2 "# -       kcal/mol   kcal/mol  kcal/mol"
+
+# Radius of Gyration (ROG) compute
+compute molchunks all chunk/atom molecule
+compute rog all gyration/chunk molchunks
+fix rog_chunk_avg all ave/time 10 100 1000 c_rog file rog.dat mode vector
+
+# Mean square displacement (MSD) compute
+compute commob all com/chunk molchunks
+fix msd_chunk_avg all ave/time 10 100 1000 c_commob[*] file com.dat mode vector
+
+# Print current number of broken bonds
+variable numbonds equal bonds
+fix bondprint all print 1000 "$(step) $(time) ${numbonds}" file numbonds.dat screen no title "# timestep time/fs [Total Number of bonds]"
+
+# Observed region stress calculation
+compute        peratom obs stress/atom NULL
+compute        p obs reduce sum c_peratom[1] c_peratom[2] c_peratom[3]
+variable       stressxx equal "(c_p[1]/v_volobs)*0.101325"
+variable       stressyy equal "(c_p[2]/v_volobs)*0.101325"
+variable       stresszz equal "(c_p[3]/v_volobs)*0.101325"
+fix obsstressprint all print 1000 "${currstep} ${p1} ${stressxx} ${stressyy} ${stresszz}" file stress_strain_obs.dat screen no
+
+run 13000000 # upto 650% strain
+
+#dump           2 all xtc 400 cgps_hires.xtc
+#dump_modify	   2 scale no image yes
+
+#reset_mol_ids all compress yes single yes
+
+# Stress simulation
+write_data	cgps_check.data
+write_restart  cgps.rst
+
+reset_atoms mol all
+
+write_data cgps_new_mols.data
